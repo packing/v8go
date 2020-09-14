@@ -19,6 +19,7 @@ cc_library(
 go_library(
     name = "go_default_library",
     srcs = [
+        "doc.go",
         "v8bridge.cc",
         "v8bridge.h",
         "v8_darwin.go",

@@ -24,6 +24,7 @@
 #include <map>
 #include <libgen.h>
 #include <unistd.h>
+#include <string.h>
 
 extern "C" {
 #include "_cgo_export.h"
@@ -272,7 +273,7 @@ const char * V8Version() {
 }
 
 void v8goVersion(const FunctionCallbackInfo<Value> &args) {
-    args.GetReturnValue().Set(String::NewFromUtf8(args.GetIsolate(), V8Version()).ToLocalChecked());
+    args.GetReturnValue().Set(String::NewFromUtf8(args.GetIsolate(), V8Version()));
 }
 
 int V8DispatchEnterEvent(VMPtr vmPtr, const char * sessionId, const char *addr) {
@@ -283,7 +284,7 @@ int V8DispatchEnterEvent(VMPtr vmPtr, const char * sessionId, const char *addr) 
     Context::Scope context_scope(context);
     auto global = context->Global();
 
-    MaybeLocal<Value> maybeEnterVal = global->Get(context, String::NewFromUtf8(vmPtr->isolate, "enter").ToLocalChecked());
+    MaybeLocal<Value> maybeEnterVal = global->Get(context, String::NewFromUtf8(vmPtr->isolate, "enter"));
     if (maybeEnterVal.IsEmpty()) {
         std::string out = "'enter' not found\n";
         vmPtr->last_exception = out;
@@ -304,8 +305,8 @@ int V8DispatchEnterEvent(VMPtr vmPtr, const char * sessionId, const char *addr) 
     }
 
     Local<Value> args[2];
-    args[0] = String::NewFromUtf8(vmPtr->isolate, sessionId).ToLocalChecked();
-    args[1] = String::NewFromUtf8(vmPtr->isolate, addr).ToLocalChecked();
+    args[0] = String::NewFromUtf8(vmPtr->isolate, sessionId);
+    args[1] = String::NewFromUtf8(vmPtr->isolate, addr);
     MaybeLocal<Value> result = enter->CallAsFunction(context, Undefined(vmPtr->isolate), 2, args);
     if(result.IsEmpty()) {
         assert(try_catch.HasCaught());
@@ -324,7 +325,7 @@ int V8DispatchLeaveEvent(VMPtr vmPtr, const char * sessionId, const char *addr) 
     Context::Scope context_scope(context);
     auto global = context->Global();
 
-    MaybeLocal<Value> maybeEnterVal = global->Get(context, String::NewFromUtf8(vmPtr->isolate, "leave").ToLocalChecked());
+    MaybeLocal<Value> maybeEnterVal = global->Get(context, String::NewFromUtf8(vmPtr->isolate, "leave"));
     if (maybeEnterVal.IsEmpty()) {
         std::string out = "'leave' not found\n";
         vmPtr->last_exception = out;
@@ -345,8 +346,8 @@ int V8DispatchLeaveEvent(VMPtr vmPtr, const char * sessionId, const char *addr) 
     }
 
     Local<Value> args[2];
-    args[0] = String::NewFromUtf8(vmPtr->isolate, sessionId).ToLocalChecked();
-    args[1] = String::NewFromUtf8(vmPtr->isolate, addr).ToLocalChecked();
+    args[0] = String::NewFromUtf8(vmPtr->isolate, sessionId);
+    args[1] = String::NewFromUtf8(vmPtr->isolate, addr);
     MaybeLocal<Value> result = enter->CallAsFunction(context, Undefined(vmPtr->isolate), 2, args);
     if(result.IsEmpty()) {
         assert(try_catch.HasCaught());
@@ -365,7 +366,7 @@ int V8DispatchMessageEvent(VMPtr vmPtr, const char * sessionId, VMValuePtr vmVal
     Context::Scope context_scope(context);
     auto global = context->Global();
 
-    MaybeLocal<Value> maybeEnterVal = global->Get(context, String::NewFromUtf8(vmPtr->isolate, "message").ToLocalChecked());
+    MaybeLocal<Value> maybeEnterVal = global->Get(context, String::NewFromUtf8(vmPtr->isolate, "message"));
     if (maybeEnterVal.IsEmpty()) {
         std::string out = "'message' not found\n";
         vmPtr->last_exception = out;
@@ -386,7 +387,7 @@ int V8DispatchMessageEvent(VMPtr vmPtr, const char * sessionId, VMValuePtr vmVal
     }
 
     Local<Value> args[2];
-    args[0] = String::NewFromUtf8(vmPtr->isolate, sessionId).ToLocalChecked();
+    args[0] = String::NewFromUtf8(vmPtr->isolate, sessionId);
     args[1] = vmValuePtr->value.Get(vmPtr->isolate);
     MaybeLocal<Value> result = enter->CallAsFunction(context, Undefined(vmPtr->isolate), 2, args);
     if(result.IsEmpty()) {
@@ -436,7 +437,7 @@ void V8ObjectSetString(VMPtr vmPtr, VMValuePtr o, const char *name, const char *
     Context::Scope context_scope(context);
 
     Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
-    auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name).ToLocalChecked(), String::NewFromUtf8(vmPtr->isolate, val).ToLocalChecked());
+    auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name), String::NewFromUtf8(vmPtr->isolate, val));
 }
 
 void V8ObjectSetStringForIndex(VMPtr vmPtr, VMValuePtr o, int index, const char *val) {
@@ -447,7 +448,7 @@ void V8ObjectSetStringForIndex(VMPtr vmPtr, VMValuePtr o, int index, const char 
     Context::Scope context_scope(context);
 
     Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
-    auto success = oo->Set(context, (uint32_t)index, String::NewFromUtf8(vmPtr->isolate, val).ToLocalChecked());
+    auto success = oo->Set(context, (uint32_t)index, String::NewFromUtf8(vmPtr->isolate, val));
 }
 
 void V8ObjectSetInteger(VMPtr vmPtr, VMValuePtr o, const char *name, int64_t val) {
@@ -458,7 +459,7 @@ void V8ObjectSetInteger(VMPtr vmPtr, VMValuePtr o, const char *name, int64_t val
     Context::Scope context_scope(context);
 
     Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
-    auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name).ToLocalChecked(), Integer::New(vmPtr->isolate, val));
+    auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name), Integer::New(vmPtr->isolate, val));
 }
 
 void V8ObjectSetIntegerForIndex(VMPtr vmPtr, VMValuePtr o, int index, int64_t val) {
@@ -481,7 +482,7 @@ void V8ObjectSetValue(VMPtr vmPtr, VMValuePtr o, const char *name, VMValuePtr va
 
     Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
     Local<Value> vv = val->value.Get(vmPtr->isolate);
-    auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name).ToLocalChecked(), vv);
+    auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name), vv);
 }
 
 void V8ObjectSetValueForIndex(VMPtr vmPtr, VMValuePtr o, int index, VMValuePtr val) {
@@ -504,7 +505,7 @@ void V8ObjectSetFloat(VMPtr vmPtr, VMValuePtr o, const char *name, double val) {
     Context::Scope context_scope(context);
 
     Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
-    auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name).ToLocalChecked(), Number::New(vmPtr->isolate, val));
+    auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name), Number::New(vmPtr->isolate, val));
 }
 
 void V8ObjectSetFloatForIndex(VMPtr vmPtr, VMValuePtr o, int index, double val) {
@@ -526,7 +527,7 @@ void V8ObjectSetBoolean(VMPtr vmPtr, VMValuePtr o, const char *name, bool val) {
     Context::Scope context_scope(context);
 
     Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
-    auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name).ToLocalChecked(), val ? True(vmPtr->isolate) : False(vmPtr->isolate));
+    auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name), val ? True(vmPtr->isolate) : False(vmPtr->isolate));
 }
 
 void V8ObjectSetBooleanForIndex(VMPtr vmPtr, VMValuePtr o, int index, bool val) {
@@ -539,6 +540,7 @@ void V8ObjectSetBooleanForIndex(VMPtr vmPtr, VMValuePtr o, int index, bool val) 
     Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
     auto success = oo->Set(context, (uint32_t)index, val ? True(vmPtr->isolate) : False(vmPtr->isolate));
 }
+
 /*
  * 初始化V8运行环境, 请注意，此处是初始化V8环境，并没有创建任何虚拟机上下文.
  */
@@ -549,7 +551,7 @@ void V8Init() {
     globalCWD = getcwd(nullptr, 0);
     V8::InitializeICU();
     V8::InitializePlatform(_priv_platform.get());
-    V8::SetFlagsFromString("--es_staging --harmony");
+    V8::SetFlagsFromString("--es_staging --harmony", int(strlen("--es_staging --harmony")));
     V8::Initialize();
 }
 
@@ -601,26 +603,26 @@ VMPtr V8NewVM() {
 
     auto global = context->Global();
 
-    Local<Value> consoleV = global->Get(context, String::NewFromUtf8(isolate, "console").ToLocalChecked()).ToLocalChecked();
+    Local<Value> consoleV = global->Get(context, String::NewFromUtf8(isolate, "console")).ToLocalChecked();
     Local<Object> console = Local<Object>::Cast(consoleV);
 
-    bool success = console->Set(context, String::NewFromUtf8(isolate, "log").ToLocalChecked(),
+    bool success = console->Set(context, String::NewFromUtf8(isolate, "log"),
                    FunctionTemplate::New(isolate, consoleLog)->GetFunction(context).ToLocalChecked()).FromMaybe(false);
 
-    success = console->Set(context, String::NewFromUtf8(isolate, "info").ToLocalChecked(),
+    success = console->Set(context, String::NewFromUtf8(isolate, "info"),
                    FunctionTemplate::New(isolate, consoleInfo)->GetFunction(context).ToLocalChecked()).FromMaybe(false);
 
-    success = console->Set(context, String::NewFromUtf8(isolate, "assert").ToLocalChecked(),
+    success = console->Set(context, String::NewFromUtf8(isolate, "assert"),
                    FunctionTemplate::New(isolate, consoleAssert)->GetFunction(context).ToLocalChecked()).FromMaybe(false);
 
-    success = console->Set(context, String::NewFromUtf8(isolate, "warn").ToLocalChecked(),
+    success = console->Set(context, String::NewFromUtf8(isolate, "warn"),
                            FunctionTemplate::New(isolate, consoleWarn)->GetFunction(context).ToLocalChecked()).FromMaybe(false);
 
     Local<ObjectTemplate> v8goTmpl = ObjectTemplate::New(isolate);
     v8goTmpl->Set(isolate, "version", FunctionTemplate::New(isolate, v8goVersion));
     Local<Object> v8go = v8goTmpl->NewInstance(context).ToLocalChecked();
 
-    success = global->Set(context, String::NewFromUtf8(isolate, "v8go").ToLocalChecked(), v8go).FromMaybe(false);
+    success = global->Set(context, String::NewFromUtf8(isolate, "v8go"), v8go).FromMaybe(false);
 
     vmPtr->isolate = isolate;
     vmPtr->context.Reset(isolate, context);
@@ -663,7 +665,7 @@ MaybeLocal<Module> V8ResolveCallback(Local<Context> context, Local<String> speci
 
     std::string specifierPath = JoinAbsPath(moduleName, vmPtr->lastReferrerPath);
 
-    if (vmPtr->modules.count(specifierPath.c_str()) == 0) {
+    if (vmPtr->modules.count(specifierPath) == 0) {
         std::string out;
         out.append("Module (");
         out.append(moduleName);
@@ -674,7 +676,7 @@ MaybeLocal<Module> V8ResolveCallback(Local<Context> context, Local<String> speci
         return r;
     }
 
-    return vmPtr->modules[specifierPath.c_str()].Get(isolate);
+    return vmPtr->modules[specifierPath].Get(isolate);
 }
 
 /*
@@ -682,7 +684,7 @@ MaybeLocal<Module> V8ResolveCallback(Local<Context> context, Local<String> speci
  */
 int V8Load(VMPtr vmPtr, const char *fileName, const char *inSourceCode) {
 
-    std::string sourceStr = "";
+    std::string sourceStr;
     const char * sourceCode = inSourceCode;
     if(sourceCode == nullptr) {
         size_t sourceLen = 0;
@@ -710,8 +712,8 @@ int V8Load(VMPtr vmPtr, const char *fileName, const char *inSourceCode) {
 
     TryCatch try_catch(vmPtr->isolate);
 
-    Local<String> name = String::NewFromUtf8(vmPtr->isolate, fileName).ToLocalChecked();
-    Local<String> source_text = String::NewFromUtf8(vmPtr->isolate, sourceCode).ToLocalChecked();
+    Local<String> name = String::NewFromUtf8(vmPtr->isolate, fileName);
+    Local<String> source_text = String::NewFromUtf8(vmPtr->isolate, sourceCode);
 
     Local<Integer> line_offset = Integer::New(vmPtr->isolate, 0);
     Local<Integer> column_offset = Integer::New(vmPtr->isolate, 0);
@@ -743,7 +745,7 @@ int V8Load(VMPtr vmPtr, const char *fileName, const char *inSourceCode) {
 
     auto global = context->Global();
 
-    MaybeLocal<Value> maybeMainVal = global->Get(context, String::NewFromUtf8(vmPtr->isolate, "main").ToLocalChecked());
+    MaybeLocal<Value> maybeMainVal = global->Get(context, String::NewFromUtf8(vmPtr->isolate, "main"));
     if (maybeMainVal.IsEmpty()) {
         std::string out = "'main' not found\n";
         vmPtr->last_exception = out;
@@ -763,8 +765,7 @@ int V8Load(VMPtr vmPtr, const char *fileName, const char *inSourceCode) {
         return 2;
     }
     auto s = main->CallAsFunction(context, Undefined(vmPtr->isolate), 0, nullptr);
-
-    return 0;
+    return s.IsEmpty() ? 2 : 0;
 }
 
 /*
@@ -785,7 +786,7 @@ int V8LoadModule(VMPtr vmPtr, const char *fileName, const char *inSourceCode, co
     }
     vmPtr->resolvings[stlFileName] = true;
 
-    std::string sourceStr = "";
+    std::string sourceStr;
     const char * sourceCode = inSourceCode;
     if(sourceCode == nullptr) {
         size_t sourceLen = 0;
@@ -817,8 +818,8 @@ int V8LoadModule(VMPtr vmPtr, const char *fileName, const char *inSourceCode, co
 
     TryCatch try_catch(vmPtr->isolate);
 
-    Local<String> name = String::NewFromUtf8(vmPtr->isolate, stlFileName.c_str()).ToLocalChecked();
-    Local<String> source_text = String::NewFromUtf8(vmPtr->isolate, sourceCode).ToLocalChecked();
+    Local<String> name = String::NewFromUtf8(vmPtr->isolate, stlFileName.c_str());
+    Local<String> source_text = String::NewFromUtf8(vmPtr->isolate, sourceCode);
 
     Local<Integer> line_offset = Integer::New(vmPtr->isolate, 0);
     Local<Integer> column_offset = Integer::New(vmPtr->isolate, 0);

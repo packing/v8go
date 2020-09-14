@@ -1,3 +1,3 @@
-module github.com/packing/js8
+module v8go
 
-        go 1.13
+go 1.15

@@ -20,6 +20,7 @@
 #include "v8.h"
 
 #include <sstream>
+#include <cassert>
 #include <map>
 #include <libgen.h>
 #include <unistd.h>

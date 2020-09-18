@@ -34,7 +34,66 @@ import (
 )
 import "runtime"
 
+var (
+    goV8KindStart       = C.uint(0)
+    goV8KindUndefined   = C.uint(1)
+    goV8KindNull        = C.uint(1 << 1)
+    goV8KindString      = C.uint(1 << 2)
+    goV8KindInt         = C.uint(1 << 3)
+    goV8KindUint        = C.uint(1 << 4)
+    goV8KindBigInt      = C.uint(1 << 5)
+    goV8KindNumber      = C.uint(1 << 6)
+    goV8KindBool        = C.uint(1 << 7)
+    goV8KindObject      = C.uint(1 << 8)
+    goV8KindArray       = C.uint(1 << 9)
+)
+
 var initV8Once sync.Once
+
+var OnSendMessage func(string, uint64, interface{}) int = nil
+var OnSendMessageTo func(interface{}) int = nil
+var OnOutput func(string) = nil
+
+//export GoOutput
+func GoOutput(c *C.char) {
+    s := C.GoString(c)
+    if OnOutput != nil {
+        OnOutput(s)
+    } else {
+        fmt.Println(s)
+    }
+}
+
+//export GoSend
+func GoSend(vm C.VMPtr, jsValue C.VMValuePtr) C.int {
+    if OnSendMessage == nil {
+        return C.int(0)
+    }
+
+    sAddr := C.GoString(C.V8GetVMAssociatedSourceAddr(vm))
+    sId := uint64(C.V8GetVMAssociatedSourceId(vm))
+
+    data := transferJsValue2GoValue(vm, jsValue)
+    if data != nil {
+        OnSendMessage(sAddr, sId, data)
+    }
+
+    return C.int(0)
+}
+
+//export GoSendTo
+func GoSendTo(vm C.VMPtr, jsValue C.VMValuePtr) C.int {
+    if OnSendMessageTo == nil {
+        return C.int(0)
+    }
+
+    data := transferJsValue2GoValue(vm, jsValue)
+    if data != nil {
+        OnSendMessageTo(data)
+    }
+
+    return C.int(0)
+}
 
 type VM struct {
     vmCPtr C.VMPtr
@@ -81,26 +140,47 @@ func (vm *VM) Load(path string) bool {
         C.free(unsafe.Pointer(cPath))
     }()
 
-    r := C.V8Load(vm.vmCPtr, C.CString(path), nil)
+    r := C.V8Load(vm.vmCPtr, cPath, nil)
     if r == 2 {
         fmt.Println(C.GoString(C.V8LastException(vm.vmCPtr)))
+    }
+    if r == -1 {
+        fmt.Printf("\nScript entryfile %s is not exists!\n\n", path)
     }
     return r == 0
 }
 
-func (vm *VM) DispatchEnter(sessionId string, addr string) int {
+func (vm *VM) SetAssociatedSourceAddr(addr string) {
+    cAddr := C.CString(addr)
+    defer func() {
+        C.free(unsafe.Pointer(cAddr))
+    }()
+    C.V8SetVMAssociatedSourceAddr(vm.vmCPtr, cAddr)
+}
+
+func (vm *VM) SetAssociatedSourceId(id uint64) {
+    C.V8SetVMAssociatedSourceId(vm.vmCPtr, C.uint64_t(id))
+}
+
+func (vm *VM) GetAssociatedSourceAddr() string {
+    return C.GoString(C.V8GetVMAssociatedSourceAddr(vm.vmCPtr))
+}
+
+func (vm *VM) GetAssociatedSourceId() uint64 {
+    return uint64(C.V8GetVMAssociatedSourceId(vm.vmCPtr))
+}
+
+func (vm *VM) DispatchEnter(sessionId uint64, addr string) int {
     if vm.disposed {
         return -1
     }
 
-    cSessionId := C.CString(sessionId)
     cAddr := C.CString(addr)
     defer func() {
-        C.free(unsafe.Pointer(cSessionId))
         C.free(unsafe.Pointer(cAddr))
     }()
 
-    r := C.V8DispatchEnterEvent(vm.vmCPtr, cSessionId, cAddr)
+    r := C.V8DispatchEnterEvent(vm.vmCPtr, C.uint64_t(sessionId), cAddr)
     if r == 2 {
         fmt.Println(C.GoString(C.V8LastException(vm.vmCPtr)))
     }
@@ -108,19 +188,17 @@ func (vm *VM) DispatchEnter(sessionId string, addr string) int {
     return int(r)
 }
 
-func (vm *VM) DispatchLeave(sessionId string, addr string) int {
+func (vm *VM) DispatchLeave(sessionId uint64, addr string) int {
     if vm.disposed {
         return -1
     }
 
-    cSessionId := C.CString(sessionId)
     cAddr := C.CString(addr)
     defer func() {
-        C.free(unsafe.Pointer(cSessionId))
         C.free(unsafe.Pointer(cAddr))
     }()
 
-    r := C.V8DispatchLeaveEvent(vm.vmCPtr, cSessionId, cAddr)
+    r := C.V8DispatchLeaveEvent(vm.vmCPtr, C.uint64_t(sessionId), cAddr)
     if r == 2 {
         fmt.Println(C.GoString(C.V8LastException(vm.vmCPtr)))
     }
@@ -238,24 +316,85 @@ func transferGoMap2JsObject(vm *VM, jsMap C.VMValuePtr, goMap map[interface{}] i
     }
 }
 
-func (vm *VM) DispatchMessage(sessionId string, msg map[interface{}] interface{}) int {
+func (vm *VM) DispatchMessage(sessionId uint64, msg map[interface{}] interface{}) int {
     if vm.disposed {
         return -1
     }
 
-    cSessionId := C.CString(sessionId)
     m := C.V8CreateVMObject(vm.vmCPtr)
     defer func() {
-        C.free(unsafe.Pointer(cSessionId))
         C.V8DisposeVMValue(m)
     }()
 
     transferGoMap2JsObject(vm, m, msg)
 
-    r := C.V8DispatchMessageEvent(vm.vmCPtr, C.CString(sessionId), m)
+    r := C.V8DispatchMessageEvent(vm.vmCPtr, C.uint64_t(sessionId), m)
     if r == 2 {
         fmt.Println(C.GoString(C.V8LastException(vm.vmCPtr)))
     }
 
     return int(r)
+}
+
+func transferJsArray2GoArray(vm C.VMPtr, jsArray C.VMValuePtr) [] interface{} {
+    length := int(C.V8ObjectGetLength(vm, jsArray))
+    l := make([] interface{}, length)
+
+    for i := 0; i < length; i ++ {
+        val := C.V8GetObjectValueAtIndex(vm, jsArray, C.uint(i))
+        l[i] = transferJsValue2GoValue(vm, val)
+    }
+
+    return l
+}
+
+func transferJsObject2GoObject(vm C.VMPtr, jsObject C.VMValuePtr) map[interface{}] interface{} {
+    cKeys := C.V8ObjectGetKeys(vm, jsObject)
+    defer C.V8ReleaseStringArrays(cKeys)
+
+    length := int(C.V8GetStringArraysLength(cKeys))
+
+    m := make(map[interface{}] interface{})
+
+    for i := 0; i < length; i ++ {
+        func(index int, mDst map[interface{}] interface{}) {
+            k := C.V8GetStringArraysItem(cKeys, C.int(index))
+            nk, e := strconv.Atoi(C.GoString(k))
+            if e != nil {
+                return
+            }
+            val := C.V8GetObjectValue(vm, jsObject, k)
+            defer C.V8DisposeVMValue(val)
+            mDst[nk] = transferJsValue2GoValue(vm, val)
+        }(i, m)
+    }
+
+    return m
+}
+
+func transferJsValue2GoValue(vm C.VMPtr, jsValue C.VMValuePtr) interface{} {
+    cEmptyStr := C.CString("")
+    defer C.free(unsafe.Pointer(cEmptyStr))
+    if (C.V8GetVMValueKind(jsValue) & goV8KindUndefined) == goV8KindUndefined {
+        return nil
+    } else if (C.V8GetVMValueKind(jsValue) & goV8KindNull) == goV8KindNull {
+        return nil
+    } else if (C.V8GetVMValueKind(jsValue) & goV8KindString) == goV8KindString {
+        return C.GoString(C.V8ValueAsString(vm, jsValue, cEmptyStr))
+    } else if (C.V8GetVMValueKind(jsValue) & goV8KindArray) == goV8KindArray {
+        return transferJsArray2GoArray(vm, jsValue)
+    } else if (C.V8GetVMValueKind(jsValue) & goV8KindObject) == goV8KindObject {
+        return transferJsObject2GoObject(vm, jsValue)
+    } else if (C.V8GetVMValueKind(jsValue) & goV8KindUint) == goV8KindUint {
+        return uint64(C.V8ValueAsUint(vm, jsValue, C.uint64_t(0)))
+    } else if (C.V8GetVMValueKind(jsValue) & goV8KindInt) == goV8KindInt {
+        return int64(C.V8ValueAsInt(vm, jsValue, C.int64_t(0)))
+    } else if (C.V8GetVMValueKind(jsValue) & goV8KindBigInt) == goV8KindBigInt {
+        return int64(C.V8ValueAsInt(vm, jsValue, C.int64_t(0)))
+    } else if (C.V8GetVMValueKind(jsValue) & goV8KindNumber) == goV8KindNumber {
+        return float64(C.V8ValueAsFloat(vm, jsValue, C.double(0)))
+    } else if (C.V8GetVMValueKind(jsValue) & goV8KindBool) == goV8KindBool {
+        return bool(C.V8ValueAsBoolean(vm, jsValue, false))
+    }
+    return nil
 }

@@ -129,6 +129,8 @@ typedef struct _VM {
     ArrayBuffer::Allocator *allocator;
     std::map<std::string, bool> resolvings;
     std::string lastReferrerPath;
+    std::string associatedSourceAddr;
+    uint64_t associatedSourceId;
 } VM;
 
 
@@ -136,8 +138,14 @@ typedef struct _VMObject {
     Local<Object> object;
 } VMObject;
 
+
+typedef struct _V8StringArrays {
+    std::vector<std::string> strs;
+} V8StringArrays;
+
 typedef struct _VMValue {
     Persistent<Value> value;
+    unsigned int kind;
 } VMValue;
 /*
  * 默认输出回调，直接输出到stdout, 但它未能支持格式化字符.
@@ -153,20 +161,29 @@ int stdOutputCallback(const char *tag, FunctionCallbackInfoPtr argsPtr) {
     int startIndex = strcmp(tag, "A") != 0 ? 0 : 1;
     bool first = true;
 
-    printf("[J][%s]%s >>> ", tag, s);
+    std::string o = "[J][";
+    o += tag;
+    o += "]";
+    o += s;
+    o += " >>> ";
 
     for (int i = startIndex; i < args->Length(); i++) {
         if (first) {
             first = false;
         } else {
-            printf(" ");
+            o += " ";
         }
         String::Utf8Value str(args->GetIsolate(), (*args)[i]);
         const char *cstr = *str;
-        printf("%s", cstr);
+        o += cstr;
     }
-    printf("\n");
+
+#ifdef GOOUTPUT
+    GoOutput((char *)o.c_str());
+#else
+    printf("%s\n", o.c_str());
     fflush(stdout);
+#endif
 
     return 0;
 }
@@ -175,6 +192,21 @@ int stdOutputCallback(const char *tag, FunctionCallbackInfoPtr argsPtr) {
  * 初始化输出回调为默认
  */
 OutputCallback outputCallback = stdOutputCallback;
+
+size_t V8GetStringArraysLength(V8StringArraysPtr v8StringArraysPtr) {
+    return v8StringArraysPtr->strs.size();
+}
+
+const char *V8GetStringArraysItem(V8StringArraysPtr v8StringArraysPtr, int index) {
+    if (index < 0 || index >= v8StringArraysPtr->strs.size())
+        return nullptr;
+    return v8StringArraysPtr->strs[index].c_str();
+}
+
+void V8ReleaseStringArrays(V8StringArraysPtr v8StringArraysPtr) {
+    v8StringArraysPtr->strs.clear();
+    delete v8StringArraysPtr;
+}
 
 /*
  * console.log 回调
@@ -276,7 +308,61 @@ void v8goVersion(const FunctionCallbackInfo<Value> &args) {
     args.GetReturnValue().Set(String::NewFromUtf8(args.GetIsolate(), V8Version()).ToLocalChecked());
 }
 
-int V8DispatchEnterEvent(VMPtr vmPtr, const char * sessionId, const char *addr) {
+void v8goSend(const FunctionCallbackInfo<Value> &args) {
+    int sentLen = -1;
+    if (args.Length() == 0) {
+        args.GetReturnValue().Set(sentLen);
+        return;
+    }
+    auto vmPtr = static_cast<VMPtr>(args.GetIsolate()->GetData(0));
+    if (vmPtr == nullptr) {
+        args.GetReturnValue().Set(sentLen);
+        return;
+    }
+
+    if (args.Length() == 1) {
+        auto vmValue = new VMValue;
+        vmValue->value.Reset(args.GetIsolate(), args[0]);
+        vmValue->kind = v8KindObject;
+        if (args[0]->IsArray())
+            vmValue->kind |= v8KindArray;
+#ifdef GOOUTPUT
+        sentLen = GoSend(vmPtr, vmValue);
+#endif
+        V8DisposeVMValue(vmValue);
+    }
+
+    args.GetReturnValue().Set(sentLen);
+}
+
+void v8goSendTo(const FunctionCallbackInfo<Value> &args) {
+    int sentLen = -1;
+    if (args.Length() == 0) {
+        args.GetReturnValue().Set(sentLen);
+        return;
+    }
+    auto vmPtr = static_cast<VMPtr>(args.GetIsolate()->GetData(0));
+    if (vmPtr == nullptr) {
+        args.GetReturnValue().Set(sentLen);
+        return;
+    }
+
+    if (args.Length() == 1) {
+        auto vmValue = new VMValue;
+        vmValue->value.Reset(args.GetIsolate(), args[0]);
+        vmValue->kind = v8KindObject;
+        if (args[0]->IsArray())
+            vmValue->kind |= v8KindArray;
+#ifdef GOOUTPUT
+        sentLen = GoSendTo(vmPtr, vmValue);
+#endif
+        V8DisposeVMValue(vmValue);
+    }
+
+    args.GetReturnValue().Set(sentLen);
+}
+
+int V8DispatchEnterEvent(VMPtr vmPtr, uint64_t sessionId, const char *addr) {
     Locker locker(vmPtr->isolate);
     HandleScope handle_scope(vmPtr->isolate);
     TryCatch try_catch(vmPtr->isolate);
@@ -305,7 +391,7 @@ int V8DispatchEnterEvent(VMPtr vmPtr, const char * sessionId, const char *addr) 
     }
 
     Local<Value> args[2];
-    args[0] = String::NewFromUtf8(vmPtr->isolate, sessionId).ToLocalChecked();
+    args[0] = BigInt::NewFromUnsigned(vmPtr->isolate, sessionId);
     args[1] = String::NewFromUtf8(vmPtr->isolate, addr).ToLocalChecked();
     MaybeLocal<Value> result = enter->CallAsFunction(context, Undefined(vmPtr->isolate), 2, args);
     if(result.IsEmpty()) {
@@ -317,7 +403,7 @@ int V8DispatchEnterEvent(VMPtr vmPtr, const char * sessionId, const char *addr) 
 }
 
 
-int V8DispatchLeaveEvent(VMPtr vmPtr, const char * sessionId, const char *addr) {
+int V8DispatchLeaveEvent(VMPtr vmPtr, uint64_t sessionId, const char *addr) {
     Locker locker(vmPtr->isolate);
     HandleScope handle_scope(vmPtr->isolate);
     TryCatch try_catch(vmPtr->isolate);
@@ -346,7 +432,7 @@ int V8DispatchLeaveEvent(VMPtr vmPtr, const char * sessionId, const char *addr) 
     }
 
     Local<Value> args[2];
-    args[0] = String::NewFromUtf8(vmPtr->isolate, sessionId).ToLocalChecked();
+    args[0] = BigInt::NewFromUnsigned(vmPtr->isolate, sessionId);
     args[1] = String::NewFromUtf8(vmPtr->isolate, addr).ToLocalChecked();
     MaybeLocal<Value> result = enter->CallAsFunction(context, Undefined(vmPtr->isolate), 2, args);
     if(result.IsEmpty()) {
@@ -358,7 +444,7 @@ int V8DispatchLeaveEvent(VMPtr vmPtr, const char * sessionId, const char *addr) 
 }
 
 
-int V8DispatchMessageEvent(VMPtr vmPtr, const char * sessionId, VMValuePtr vmValuePtr) {
+int V8DispatchMessageEvent(VMPtr vmPtr, uint64_t sessionId, VMValuePtr vmValuePtr) {
     Locker locker(vmPtr->isolate);
     HandleScope handle_scope(vmPtr->isolate);
     TryCatch try_catch(vmPtr->isolate);
@@ -387,7 +473,7 @@ int V8DispatchMessageEvent(VMPtr vmPtr, const char * sessionId, VMValuePtr vmVal
     }
 
     Local<Value> args[2];
-    args[0] = String::NewFromUtf8(vmPtr->isolate, sessionId).ToLocalChecked();
+    args[0] = BigInt::NewFromUnsigned(vmPtr->isolate, sessionId);
     args[1] = vmValuePtr->value.Get(vmPtr->isolate);
     MaybeLocal<Value> result = enter->CallAsFunction(context, Undefined(vmPtr->isolate), 2, args);
     if(result.IsEmpty()) {
@@ -408,6 +494,7 @@ VMValuePtr V8CreateVMObject(VMPtr vmPtr) {
     Local<Object> o = ObjectTemplate::New(vmPtr->isolate)->NewInstance(context).ToLocalChecked();
     VMValuePtr vmValuePtr = new VMValue;
     vmValuePtr->value.Reset(vmPtr->isolate, o);
+    vmValuePtr->kind = v8KindObject;
     return vmValuePtr;
 }
 
@@ -419,14 +506,19 @@ VMValuePtr V8CreateVMArray(VMPtr vmPtr, int length) {
     Context::Scope context_scope(context);
 
     Local<Array> o = Array::New(vmPtr->isolate, length);
-    VMValuePtr vmValuePtr = new VMValue;
+    auto vmValuePtr = new VMValue;
     vmValuePtr->value.Reset(vmPtr->isolate, o);
+    vmValuePtr->kind = v8KindArray;
     return vmValuePtr;
 }
 
 void V8DisposeVMValue(VMValuePtr vmValuePtr) {
     vmValuePtr->value.Reset();
     delete vmValuePtr;
+}
+
+unsigned int V8GetVMValueKind(VMValuePtr vmValuePtr) {
+    return vmValuePtr->kind;
 }
 
 void V8ObjectSetString(VMPtr vmPtr, VMValuePtr o, const char *name, const char *val) {
@@ -436,7 +528,7 @@ void V8ObjectSetString(VMPtr vmPtr, VMValuePtr o, const char *name, const char *
     Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
     Context::Scope context_scope(context);
 
-    Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
     auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name).ToLocalChecked(), String::NewFromUtf8(vmPtr->isolate, val).ToLocalChecked());
 }
 
@@ -447,7 +539,7 @@ void V8ObjectSetStringForIndex(VMPtr vmPtr, VMValuePtr o, int index, const char 
     Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
     Context::Scope context_scope(context);
 
-    Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
     auto success = oo->Set(context, (uint32_t)index, String::NewFromUtf8(vmPtr->isolate, val).ToLocalChecked());
 }
 
@@ -458,8 +550,8 @@ void V8ObjectSetInteger(VMPtr vmPtr, VMValuePtr o, const char *name, int64_t val
     Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
     Context::Scope context_scope(context);
 
-    Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
-    auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name).ToLocalChecked(), Integer::New(vmPtr->isolate, val));
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
+    auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name).ToLocalChecked(), Number::New(vmPtr->isolate, val));
 }
 
 void V8ObjectSetIntegerForIndex(VMPtr vmPtr, VMValuePtr o, int index, int64_t val) {
@@ -469,8 +561,8 @@ void V8ObjectSetIntegerForIndex(VMPtr vmPtr, VMValuePtr o, int index, int64_t va
     Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
     Context::Scope context_scope(context);
 
-    Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
-    auto success = oo->Set(context, (uint32_t)index, Integer::New(vmPtr->isolate, val));
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
+    auto success = oo->Set(context, (uint32_t)index, Number::New(vmPtr->isolate, val));
 }
 
 void V8ObjectSetValue(VMPtr vmPtr, VMValuePtr o, const char *name, VMValuePtr val) {
@@ -480,8 +572,8 @@ void V8ObjectSetValue(VMPtr vmPtr, VMValuePtr o, const char *name, VMValuePtr va
     Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
     Context::Scope context_scope(context);
 
-    Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
-    Local<Value> vv = val->value.Get(vmPtr->isolate);
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
+    Local<Value> vv = Local<Value>::New(vmPtr->isolate, val->value);
     auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name).ToLocalChecked(), vv);
 }
 
@@ -492,7 +584,7 @@ void V8ObjectSetValueForIndex(VMPtr vmPtr, VMValuePtr o, int index, VMValuePtr v
     Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
     Context::Scope context_scope(context);
 
-    Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
     Local<Value> vv = val->value.Get(vmPtr->isolate);
     auto success = oo->Set(context, (uint32_t)index, vv);
 }
@@ -504,7 +596,7 @@ void V8ObjectSetFloat(VMPtr vmPtr, VMValuePtr o, const char *name, double val) {
     Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
     Context::Scope context_scope(context);
 
-    Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
     auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name).ToLocalChecked(), Number::New(vmPtr->isolate, val));
 }
 
@@ -515,7 +607,7 @@ void V8ObjectSetFloatForIndex(VMPtr vmPtr, VMValuePtr o, int index, double val) 
     Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
     Context::Scope context_scope(context);
 
-    Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
     auto success = oo->Set(context, (uint32_t)index, Number::New(vmPtr->isolate, val));
 }
 
@@ -526,7 +618,7 @@ void V8ObjectSetBoolean(VMPtr vmPtr, VMValuePtr o, const char *name, bool val) {
     Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
     Context::Scope context_scope(context);
 
-    Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
     auto success = oo->Set(context, String::NewFromUtf8(vmPtr->isolate, name).ToLocalChecked(), val ? True(vmPtr->isolate) : False(vmPtr->isolate));
 }
 
@@ -537,8 +629,231 @@ void V8ObjectSetBooleanForIndex(VMPtr vmPtr, VMValuePtr o, int index, bool val) 
     Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
     Context::Scope context_scope(context);
 
-    Local<Object> oo = Local<Object>::Cast(o->value.Get(vmPtr->isolate));
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
     auto success = oo->Set(context, (uint32_t)index, val ? True(vmPtr->isolate) : False(vmPtr->isolate));
+}
+
+V8StringArraysPtr V8ObjectGetKeys(VMPtr vmPtr, VMValuePtr o) {
+    Locker locker(vmPtr->isolate);
+    HandleScope handle_scope(vmPtr->isolate);
+    TryCatch try_catch(vmPtr->isolate);
+    Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
+    Context::Scope context_scope(context);
+
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
+    Local<Array> v8keys = oo->GetPropertyNames(context).ToLocalChecked();
+    auto strings = new V8StringArrays;
+    strings->strs.resize(v8keys->Length());
+    for (int i = 0; i < v8keys->Length(); i ++) {
+        String::Utf8Value str(vmPtr->isolate, v8keys->Get(context, i).ToLocalChecked());
+        strings->strs[i] = V8ToCString(str);
+    }
+    return strings;
+}
+
+size_t V8ObjectGetLength(VMPtr vmPtr, VMValuePtr o) {
+    Locker locker(vmPtr->isolate);
+    HandleScope handle_scope(vmPtr->isolate);
+    TryCatch try_catch(vmPtr->isolate);
+    Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
+    Context::Scope context_scope(context);
+
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
+    Local<Array> array = Local<Array>::Cast(oo);
+    return (size_t) array->Length();
+}
+
+VMValuePtr V8GetObjectValue(VMPtr vmPtr, VMValuePtr o, const char *key) {
+    Locker locker(vmPtr->isolate);
+    HandleScope handle_scope(vmPtr->isolate);
+    TryCatch try_catch(vmPtr->isolate);
+    Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
+    Context::Scope context_scope(context);
+
+    Local<Value> v8Key = String::NewFromUtf8(vmPtr->isolate, key).ToLocalChecked();
+
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
+    Local<Value> v = oo->Get(context, v8Key).ToLocalChecked();
+
+    unsigned int kind = v8KindStart;
+
+    if (v->IsString())
+        kind |= v8KindString;
+    if (v->IsInt32())
+        kind |= v8KindInt;
+    if (v->IsBigInt())
+        kind |= v8KindBigInt;
+    if (v->IsBoolean())
+        kind |= v8KindBool;
+    if (v->IsUint32())
+        kind |= v8KindUint;
+    if (v->IsNumber()) {
+        kind |= v8KindNumber;
+        if (kind == v8KindNumber) {
+            MaybeLocal<Number> iValue = v->ToNumber(context);
+            if (!iValue.IsEmpty()) {
+                auto db = iValue.ToLocalChecked()->Value();
+                if (db == (double)(int64_t)db) {
+                    kind |= v8KindInt;
+                } else if (db == (double)(uint64_t)db) {
+                    kind |= v8KindUint;
+                }
+            }
+        }
+    }
+    if (v->IsObject())
+        kind |= v8KindObject;
+    if (v->IsArray())
+        kind |= v8KindArray;
+    if (v->IsNull())
+        kind |= v8KindNull;
+    if (v->IsUndefined())
+        kind |= v8KindUndefined;
+
+    auto vmValuePtr = new VMValue;
+    vmValuePtr->value.Reset(vmPtr->isolate, v);
+    vmValuePtr->kind = kind;
+    return vmValuePtr;
+}
+
+VMValuePtr V8GetObjectValueAtIndex(VMPtr vmPtr, VMValuePtr o, uint32_t index) {
+    Locker locker(vmPtr->isolate);
+    HandleScope handle_scope(vmPtr->isolate);
+    TryCatch try_catch(vmPtr->isolate);
+    Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
+    Context::Scope context_scope(context);
+
+
+    Local<Object> oo = Local<Value>::New(vmPtr->isolate, o->value)->ToObject(context).ToLocalChecked();
+    Local<Value> v = oo->Get(context, index).ToLocalChecked();
+
+    unsigned int kind = v8KindStart;
+
+    if (v->IsString())
+        kind |= v8KindString;
+    if (v->IsInt32())
+        kind |= v8KindInt;
+    if (v->IsBigInt())
+        kind |= v8KindBigInt;
+    if (v->IsBoolean())
+        kind |= v8KindBool;
+    if (v->IsUint32())
+        kind |= v8KindUint;
+    if (v->IsNumber()) {
+        kind |= v8KindNumber;
+        if (kind == v8KindNumber) {
+            MaybeLocal<Number> iValue = v->ToNumber(context);
+            if (!iValue.IsEmpty()) {
+                auto db = iValue.ToLocalChecked()->Value();
+                if (db == (double)(int64_t)db) {
+                    kind |= v8KindInt;
+                } else if (db == (double)(uint64_t)db) {
+                    kind |= v8KindUint;
+                }
+            }
+        }
+    }
+    if (v->IsObject())
+        kind |= v8KindObject;
+    if (v->IsArray())
+        kind |= v8KindArray;
+    if (v->IsNull())
+        kind |= v8KindNull;
+    if (v->IsUndefined())
+        kind |= v8KindUndefined;
+
+    auto vmValuePtr = new VMValue;
+    vmValuePtr->value.Reset(vmPtr->isolate, v);
+    vmValuePtr->kind = kind;
+    return vmValuePtr;
+}
+
+
+const char *V8ValueAsString(VMPtr vmPtr, VMValuePtr o, const char *def) {
+    Locker locker(vmPtr->isolate);
+    HandleScope handle_scope(vmPtr->isolate);
+    TryCatch try_catch(vmPtr->isolate);
+    Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
+    Context::Scope context_scope(context);
+
+    Local<Value> v = Local<Value>::New(vmPtr->isolate, o->value);
+    String::Utf8Value utf8Value(vmPtr->isolate, v);
+    return V8ToCString(utf8Value);
+}
+
+int64_t V8ValueAsInt(VMPtr vmPtr, VMValuePtr o, int64_t def) {
+    Locker locker(vmPtr->isolate);
+    HandleScope handle_scope(vmPtr->isolate);
+    TryCatch try_catch(vmPtr->isolate);
+    Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
+    Context::Scope context_scope(context);
+
+    Local<Value> v = Local<Value>::New(vmPtr->isolate, o->value);
+    if(v->IsNumber()) {
+        MaybeLocal<Number> iValue = v->ToNumber(context);
+        if (iValue.IsEmpty())
+            return def;
+        return (int64_t)iValue.ToLocalChecked()->Value();
+    }
+    return def;
+}
+
+uint64_t V8ValueAsUint(VMPtr vmPtr, VMValuePtr o, uint64_t def) {
+    Locker locker(vmPtr->isolate);
+    HandleScope handle_scope(vmPtr->isolate);
+    TryCatch try_catch(vmPtr->isolate);
+    Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
+    Context::Scope context_scope(context);
+
+    Local<Value> v = Local<Value>::New(vmPtr->isolate, o->value);
+    if(v->IsNumber()) {
+        MaybeLocal<Number> iValue = v->ToNumber(context);
+        if (iValue.IsEmpty())
+            return def;
+        return (uint64_t)iValue.ToLocalChecked()->Value();
+    }
+    return def;
+}
+
+double V8ValueAsFloat(VMPtr vmPtr, VMValuePtr o, double def) {
+    Locker locker(vmPtr->isolate);
+    HandleScope handle_scope(vmPtr->isolate);
+    TryCatch try_catch(vmPtr->isolate);
+    Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
+    Context::Scope context_scope(context);
+
+    Local<Value> v = Local<Value>::New(vmPtr->isolate, o->value);
+    if(v->IsNumber()) {
+        MaybeLocal<Number> iValue = v->ToNumber(context);
+        if (iValue.IsEmpty())
+            return def;
+        return iValue.ToLocalChecked()->Value();
+    }
+
+    return def;
+}
+
+bool V8ValueAsBoolean(VMPtr vmPtr, VMValuePtr o, bool def) {
+    Locker locker(vmPtr->isolate);
+    HandleScope handle_scope(vmPtr->isolate);
+    TryCatch try_catch(vmPtr->isolate);
+    Local<Context> context = Local<Context>::New(vmPtr->isolate, vmPtr->context);
+    Context::Scope context_scope(context);
+
+    Local<Value> v = Local<Value>::New(vmPtr->isolate, o->value);
+    if(v->IsBoolean()) {
+        MaybeLocal<Boolean> iValue = v->ToBoolean(vmPtr->isolate);
+        if (iValue.IsEmpty())
+            return def;
+        return iValue.ToLocalChecked()->Value();
+    } else if (v->IsInt32() || v->IsUint32()) {
+        MaybeLocal<Integer> iValue = v->ToInteger(context);
+        if (iValue.IsEmpty())
+            return def;
+        return iValue.ToLocalChecked()->Value() != 0;
+    }
+
+    return def;
 }
 
 /*
@@ -597,6 +912,8 @@ VMPtr V8NewVM() {
     Isolate::CreateParams create_params;
     create_params.array_buffer_allocator = ArrayBuffer::Allocator::NewDefaultAllocator();
     Isolate *isolate = Isolate::New(create_params);
+
+    Locker locker(isolate);
     HandleScope scope(isolate);
     Local<Context> context = Context::New(isolate);
     Context::Scope context_scope(context);
@@ -624,6 +941,13 @@ VMPtr V8NewVM() {
 
     success = global->Set(context, String::NewFromUtf8(isolate, "v8go").ToLocalChecked(), v8go).FromMaybe(false);
 
+    Local<ObjectTemplate> v8goNetTmpl = ObjectTemplate::New(isolate);
+    v8goNetTmpl->Set(isolate, "sendCurrentPlayer", FunctionTemplate::New(isolate, v8goSend));
+    v8goNetTmpl->Set(isolate, "sendToOtherPlayer", FunctionTemplate::New(isolate, v8goSendTo));
+    Local<Object> v8goNet = v8goNetTmpl->NewInstance(context).ToLocalChecked();
+
+    success = global->Set(context, String::NewFromUtf8(isolate, "net").ToLocalChecked(), v8goNet).FromMaybe(false);
+
     vmPtr->isolate = isolate;
     vmPtr->context.Reset(isolate, context);
     vmPtr->allocator = create_params.array_buffer_allocator;
@@ -644,6 +968,21 @@ void V8DisposeVM(VMPtr vmPtr) {
     delete vmPtr;
 }
 
+void V8SetVMAssociatedSourceAddr(VMPtr vmPtr, const char *addr) {
+    vmPtr->associatedSourceAddr = addr;
+}
+
+void V8SetVMAssociatedSourceId(VMPtr vmPtr, uint64_t id) {
+    vmPtr->associatedSourceId = id;
+}
+
+const char * V8GetVMAssociatedSourceAddr(VMPtr vmPtr) {
+    return vmPtr->associatedSourceAddr.c_str();
+}
+
+uint64_t V8GetVMAssociatedSourceId(VMPtr vmPtr) {
+    return vmPtr->associatedSourceId;
+}
 
 int ResolveModule(VMPtr vmPtr, const char *specifier, const char *referrer) {
     vmPtr->lastReferrerPath = referrer;

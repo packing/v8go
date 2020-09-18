@@ -21,7 +21,7 @@ package v8go
 #include <stdlib.h>
 #include <string.h>
 #include "v8bridge.h"
-#cgo CXXFLAGS: -I${SRCDIR} -I${SRCDIR}/libv8/linux/include -fno-rtti -fpic -std=c++11
+#cgo CXXFLAGS: -I${SRCDIR} -I${SRCDIR}/libv8/linux/include -fno-rtti -fpic -std=c++11 -DGOOUTPUT
 #cgo LDFLAGS: -pthread -L${SRCDIR}/libv8/linux/lib -lv8_monolith
 */
 import "C"

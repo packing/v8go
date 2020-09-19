@@ -968,6 +968,19 @@ void V8DisposeVM(VMPtr vmPtr) {
     delete vmPtr;
 }
 
+void V8PrintVMMemStat(VMPtr vmPtr) {
+    HeapStatistics hs;
+    vmPtr->isolate->GetHeapStatistics(&hs);
+    printf(">>>>>>>>>>>>>>>>>> HeapStatistics table >>>>>>>>>>>>>>>>>>\n");
+    printf("heap_size_limit: %ld\n", hs.heap_size_limit());
+    printf("total_heap_size: %ld\n", hs.total_heap_size());
+    printf("used_heap_size: %ld\n", hs.used_heap_size());
+    printf("total_physical_size: %ld\n", hs.total_physical_size());
+    printf("total_available_size: %ld\n", hs.total_available_size());
+    printf("total_available_size: %ld\n", hs.malloced_memory());
+    printf(">>>>>>>>>>>>>>>>>> HeapStatistics table >>>>>>>>>>>>>>>>>>\n");
+}
+
 void V8SetVMAssociatedSourceAddr(VMPtr vmPtr, const char *addr) {
     vmPtr->associatedSourceAddr = addr;
 }

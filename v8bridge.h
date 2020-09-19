@@ -70,6 +70,7 @@ void V8SetOutputCallback(OutputCallback);
 
 VMPtr V8NewVM();
 void V8DisposeVM(VMPtr);
+void V8PrintVMMemStat(VMPtr vmPtr);
 
 void V8SetVMAssociatedSourceAddr(VMPtr vmPtr, const char *addr);
 void V8SetVMAssociatedSourceId(VMPtr vmPtr, uint64_t id);

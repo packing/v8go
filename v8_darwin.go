@@ -131,6 +131,10 @@ func (vm *VM) Dispose() {
     vm.disposed = true
 }
 
+func (vm *VM) PrintMemStat() {
+    C.V8PrintVMMemStat(vm.vmCPtr)
+}
+
 func (vm *VM) Load(path string) bool {
     if vm.disposed {
         return false

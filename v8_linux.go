@@ -28,11 +28,26 @@ import "C"
 
 import (
     "fmt"
+    "runtime"
     "strconv"
     "sync"
     "unsafe"
 )
-import "runtime"
+
+type VM interface {
+    Dispose()
+    Called() int64
+    Reset()
+    PrintMemStat()
+    Load(path string) bool
+    SetAssociatedSourceAddr(addr string)
+    SetAssociatedSourceId(id uint64)
+    GetAssociatedSourceAddr() string
+    GetAssociatedSourceId() uint64
+    DispatchEnter(sessionId uint64, addr string) int
+    DispatchLeave(sessionId uint64, addr string) int
+    DispatchMessage(sessionId uint64, msg map[interface{}] interface{}) int
+}
 
 var (
     goV8KindStart       = C.uint(0)
@@ -95,9 +110,10 @@ func GoSendTo(vm C.VMPtr, jsValue C.VMValuePtr) C.int {
     return C.int(0)
 }
 
-type VM struct {
+type V8VM struct {
     vmCPtr C.VMPtr
     disposed bool
+    called int64
 }
 
 func Version() string {
@@ -114,28 +130,41 @@ func Init() {
     })
 }
 
-func CreateVM() *VM {
-    vm := new(VM)
+func CreateV8VM() VM {
+    vm := new(V8VM)
 
     vm.vmCPtr = C.V8NewVM()
     vm.disposed = false
 
     runtime.SetFinalizer(vm, func(vmWillDispose *VM) {
-        vmWillDispose.Dispose()
+        //    vmWillDispose.Dispose()
+        fmt.Printf("释放对象 %p\n", vmWillDispose)
     })
-    return vm
+
+    var rvm VM = vm
+    return rvm
 }
 
-func (vm *VM) Dispose() {
+func (vm *V8VM) Dispose() {
     C.V8DisposeVM(vm.vmCPtr)
     vm.disposed = true
 }
 
-func (vm *VM) PrintMemStat() {
+func (vm *V8VM) Called() int64 {
+    return vm.called
+}
+
+func (vm *V8VM) Reset() {
+    C.V8DisposeVM(vm.vmCPtr)
+    vm.called = 0
+    vm.vmCPtr = C.V8NewVM()
+}
+
+func (vm *V8VM) PrintMemStat() {
     C.V8PrintVMMemStat(vm.vmCPtr)
 }
 
-func (vm *VM) Load(path string) bool {
+func (vm *V8VM) Load(path string) bool {
     if vm.disposed {
         return false
     }
@@ -154,7 +183,7 @@ func (vm *VM) Load(path string) bool {
     return r == 0
 }
 
-func (vm *VM) SetAssociatedSourceAddr(addr string) {
+func (vm *V8VM) SetAssociatedSourceAddr(addr string) {
     cAddr := C.CString(addr)
     defer func() {
         C.free(unsafe.Pointer(cAddr))
@@ -162,22 +191,24 @@ func (vm *VM) SetAssociatedSourceAddr(addr string) {
     C.V8SetVMAssociatedSourceAddr(vm.vmCPtr, cAddr)
 }
 
-func (vm *VM) SetAssociatedSourceId(id uint64) {
+func (vm *V8VM) SetAssociatedSourceId(id uint64) {
     C.V8SetVMAssociatedSourceId(vm.vmCPtr, C.uint64_t(id))
 }
 
-func (vm *VM) GetAssociatedSourceAddr() string {
+func (vm *V8VM) GetAssociatedSourceAddr() string {
     return C.GoString(C.V8GetVMAssociatedSourceAddr(vm.vmCPtr))
 }
 
-func (vm *VM) GetAssociatedSourceId() uint64 {
+func (vm *V8VM) GetAssociatedSourceId() uint64 {
     return uint64(C.V8GetVMAssociatedSourceId(vm.vmCPtr))
 }
 
-func (vm *VM) DispatchEnter(sessionId uint64, addr string) int {
+func (vm *V8VM) DispatchEnter(sessionId uint64, addr string) int {
     if vm.disposed {
         return -1
     }
+
+    vm.called += 1
 
     cAddr := C.CString(addr)
     defer func() {
@@ -192,10 +223,12 @@ func (vm *VM) DispatchEnter(sessionId uint64, addr string) int {
     return int(r)
 }
 
-func (vm *VM) DispatchLeave(sessionId uint64, addr string) int {
+func (vm *V8VM) DispatchLeave(sessionId uint64, addr string) int {
     if vm.disposed {
         return -1
     }
+
+    vm.called += 1
 
     cAddr := C.CString(addr)
     defer func() {
@@ -209,7 +242,7 @@ func (vm *VM) DispatchLeave(sessionId uint64, addr string) int {
     return int(r)
 }
 
-func transferGoArray2JsArray(vm *VM, jsArray C.VMValuePtr, goArray []interface{}) {
+func transferGoArray2JsArray(vm *V8VM, jsArray C.VMValuePtr, goArray []interface{}) {
     for i, vi := range goArray {
         switch vi.(type) {
         case string:
@@ -254,7 +287,7 @@ func transferGoArray2JsArray(vm *VM, jsArray C.VMValuePtr, goArray []interface{}
     }
 }
 
-func transferGoMap2JsObject(vm *VM, jsMap C.VMValuePtr, goMap map[interface{}] interface{}) {
+func transferGoMap2JsObject(vm *V8VM, jsMap C.VMValuePtr, goMap map[interface{}] interface{}) {
     for k, v := range goMap {
         sk := ""
         switch k.(type) {
@@ -320,10 +353,12 @@ func transferGoMap2JsObject(vm *VM, jsMap C.VMValuePtr, goMap map[interface{}] i
     }
 }
 
-func (vm *VM) DispatchMessage(sessionId uint64, msg map[interface{}] interface{}) int {
+func (vm *V8VM) DispatchMessage(sessionId uint64, msg map[interface{}] interface{}) int {
     if vm.disposed {
         return -1
     }
+
+    vm.called += 1
 
     m := C.V8CreateVMObject(vm.vmCPtr)
     defer func() {

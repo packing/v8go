@@ -893,7 +893,8 @@ const char *V8LastException(VMPtr vmPtr) {
         return "";
 
     std::string s = "Uncaught exception: \n" + vmPtr->last_exception;
-    return s.c_str();
+    const char *cs = s.c_str();
+    return cs;
 }
 
 /*

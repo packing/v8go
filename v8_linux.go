@@ -30,24 +30,8 @@ import (
     "fmt"
     "runtime"
     "strconv"
-    "sync"
     "unsafe"
 )
-
-type VM interface {
-    Dispose()
-    Called() int64
-    Reset()
-    PrintMemStat()
-    Load(path string) bool
-    SetAssociatedSourceAddr(addr string)
-    SetAssociatedSourceId(id uint64)
-    GetAssociatedSourceAddr() string
-    GetAssociatedSourceId() uint64
-    DispatchEnter(sessionId uint64, addr string) int
-    DispatchLeave(sessionId uint64, addr string) int
-    DispatchMessage(sessionId uint64, msg map[interface{}] interface{}) int
-}
 
 var (
     goV8KindStart       = C.uint(0)
@@ -62,12 +46,6 @@ var (
     goV8KindObject      = C.uint(1 << 8)
     goV8KindArray       = C.uint(1 << 9)
 )
-
-var initV8Once sync.Once
-
-var OnSendMessage func(string, uint64, interface{}) int = nil
-var OnSendMessageTo func(interface{}) int = nil
-var OnOutput func(string) = nil
 
 //export GoOutput
 func GoOutput(c *C.char) {
@@ -162,6 +140,10 @@ func (vm *V8VM) Reset() {
 
 func (vm *V8VM) PrintMemStat() {
     C.V8PrintVMMemStat(vm.vmCPtr)
+}
+
+func (vm *V8VM) SetValue(name string, val interface{}) {
+
 }
 
 func (vm *V8VM) Load(path string) bool {

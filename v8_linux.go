@@ -185,6 +185,15 @@ func (vm *V8VM) GetAssociatedSourceId() uint64 {
     return uint64(C.V8GetVMAssociatedSourceId(vm.vmCPtr))
 }
 
+
+func (vm *V8VM) SetAssociatedSessionId(id uint64) {
+
+}
+
+func (vm *V8VM) GetAssociatedSessionId() uint64 {
+    return 0
+}
+
 func (vm *V8VM) DispatchEnter(sessionId uint64, addr string) int {
     if vm.disposed {
         return -1

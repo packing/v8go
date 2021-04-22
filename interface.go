@@ -13,6 +13,8 @@ type VM interface {
     SetAssociatedSourceId(id uint64)
     GetAssociatedSourceAddr() string
     GetAssociatedSourceId() uint64
+    SetAssociatedSessionId(id uint64)
+    GetAssociatedSessionId() uint64
     DispatchEnter(sessionId uint64, addr string) int
     DispatchLeave(sessionId uint64, addr string) int
     DispatchMessage(sessionId uint64, msg map[interface{}] interface{}) int
